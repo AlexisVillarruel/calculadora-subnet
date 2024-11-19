@@ -1,128 +1,143 @@
 import sys
 from PyQt6.QtWidgets import (
-    QApplication, QWidget, QLabel, QLineEdit, QPushButton, QVBoxLayout, QGridLayout, QTextEdit
+    QApplication, QMainWindow, QLabel, QLineEdit, QPushButton, QTextEdit, QVBoxLayout, QWidget
 )
-from PyQt6.QtGui import QTextCursor
 
-def ip_to_bin(ip):
-    return ".".join(f"{int(octet):08b}" for octet in ip.split("."))
 
-def apply_netmask(ip, mask_bits):
-    ip_binary = "".join(f"{int(octet):08b}" for octet in ip.split("."))
-    masked_ip = ip_binary[:mask_bits] + '0' * (32 - mask_bits)
-    return ".".join(str(int(masked_ip[i:i+8], 2)) for i in range(0, 32, 8))
+def ip_to_binary(ip):
+    octetos = ip.split(".")
+    binario = ""
+    for octeto in octetos:
+        binario += f"{int(octeto):08b}"
+    return binario
 
-def calculate_hosts(mask_bits):
-    return (2 ** (32 - mask_bits)) - 2
 
-def calculate_broadcast(network_ip_bin, mask_bits):
-    broadcast_bin = network_ip_bin[:mask_bits] + '1' * (32 - mask_bits)
-    return ".".join(str(int(broadcast_bin[i:i+8], 2)) for i in range(0, 32, 8))
+def binary_to_ip(binario):
+    ip = []
+    for i in range(0, len(binario), 8):
+        ip.append(str(int(binario[i:i+8], 2)))
+    return ".".join(ip)
 
-def calculate_subnets(ip, original_mask_bits, new_mask_bits):
-    ip_binary = "".join(f"{int(octet):08b}" for octet in ip.split("."))
-    base_network = ip_binary[:original_mask_bits]
-    num_subnets = 2 ** (new_mask_bits - original_mask_bits)
-    
-    subnets = []
-    for i in range(num_subnets):
-        subnet_bin = base_network + f"{i:0{new_mask_bits - original_mask_bits}b}" + '0' * (32 - new_mask_bits)
-        network_ip = ".".join(str(int(subnet_bin[j:j+8], 2)) for j in range(0, 32, 8))
-        
-        host_min_bin = subnet_bin[:32 - (32 - new_mask_bits)] + '0' * (32 - new_mask_bits)
-        host_min = ".".join(str(int(host_min_bin[j:j+8], 2)) for j in range(0, 32, 8))
-        host_min = host_min.split('.')
-        host_min[3] = str(int(host_min[3]) + 1)
-        
-        broadcast_ip = calculate_broadcast(subnet_bin, new_mask_bits)
-        
-        host_max = broadcast_ip.split('.')
-        host_max[3] = str(int(host_max[3]) - 1)
-        
-        hosts_count = calculate_hosts(new_mask_bits)
-        
-        subnets.append({
+
+def calculate_wildcard(mask_bits):
+    wildcard = ""
+    for i in range(32):
+        if i < mask_bits:
+            wildcard += "0"
+        else:
+            wildcard += "1"
+    return binary_to_ip(wildcard)
+
+
+def subnet_details(ip, mask_bits, new_mask_bits):
+    ip_binario = ip_to_binary(ip)
+    base_network = ip_binario[:mask_bits]
+    subnets = 2 ** (new_mask_bits - mask_bits)
+    results = []
+
+    for i in range(subnets):
+        subnet_bin = base_network + f"{i:0{new_mask_bits - mask_bits}b}" + "0" * (32 - new_mask_bits)
+        network_ip = binary_to_ip(subnet_bin)
+
+        broadcast_bin = subnet_bin[:new_mask_bits] + "1" * (32 - new_mask_bits)
+        broadcast_ip = binary_to_ip(broadcast_bin)
+
+        first_host_bin = subnet_bin[:new_mask_bits] + "0" * (31 - new_mask_bits) + "1"
+        first_host_ip = binary_to_ip(first_host_bin)
+
+        last_host_bin = broadcast_bin[:32 - 1] + "0"
+        last_host_ip = binary_to_ip(last_host_bin)
+
+        hosts_count = (2 ** (32 - new_mask_bits)) - 2
+
+        results.append({
             "network_ip": network_ip,
-            "host_min": ".".join(host_min),
-            "host_max": ".".join(host_max),
             "broadcast_ip": broadcast_ip,
-            "hosts_count": hosts_count,
-            "network_bin": format_binary_ipv4(subnet_bin, new_mask_bits, original_mask_bits)
+            "first_host_ip": first_host_ip,
+            "last_host_ip": last_host_ip,
+            "hosts_count": hosts_count
         })
-    
-    return subnets
 
-def format_binary_ipv4(bin_ip, mask_bits, original_mask_bits):
-    # Formatea y resalta los bits de red, prestados y de host en binario para IPv4 completo
-    red_bits = f"<span style='color:green'>{bin_ip[:original_mask_bits]}</span>"
-    borrowed_bits = f"<span style='color:red'>{bin_ip[original_mask_bits:mask_bits]}</span>"
-    host_bits = f"<span style='color:gray'>{bin_ip[mask_bits:]}</span>"
-    highlighted = red_bits + borrowed_bits + host_bits
-    # Dividir en bloques de 8 bits con puntos para simular el formato IPv4 completo en binario
-    return ".".join(highlighted[i:i+8] for i in range(0, 32, 8))
+    return results
 
-class SubnetCalculator(QWidget):
+
+class SubnetCalculator(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Calculadora IP")
-        layout = QGridLayout()
+        self.setWindowTitle("Calculadora de Subredes")
+        self.setGeometry(100, 100, 600, 400)
 
-        self.ip_label = QLabel("Dirección IP (Host o Red):")
-        self.ip_input = QLineEdit("192.168.0.1")
-        layout.addWidget(self.ip_label, 0, 0)
-        layout.addWidget(self.ip_input, 0, 1)
+        # Widgets
+        self.layout = QVBoxLayout()
+        self.container = QWidget()
 
-        self.original_mask_label = QLabel("Máscara (ej. 24):")
-        self.original_mask_input = QLineEdit("24")
-        layout.addWidget(self.original_mask_label, 1, 0)
-        layout.addWidget(self.original_mask_input, 1, 1)
+        self.ip_label = QLabel("Dirección IP:")
+        self.ip_input = QLineEdit()
+        self.ip_input.setPlaceholderText("Ejemplo: 192.168.0.0")
 
-        self.new_mask_label = QLabel("Mover a (nueva máscara):")
-        self.new_mask_input = QLineEdit("25")
-        layout.addWidget(self.new_mask_label, 2, 0)
-        layout.addWidget(self.new_mask_input, 2, 1)
+        self.mask_label = QLabel("Máscara original (ej. 24):")
+        self.mask_input = QLineEdit()
+        self.mask_input.setPlaceholderText("24")
+
+        self.new_mask_label = QLabel("Nueva máscara (ej. 26):")
+        self.new_mask_input = QLineEdit()
+        self.new_mask_input.setPlaceholderText("26")
 
         self.calculate_button = QPushButton("Calcular")
-        layout.addWidget(self.calculate_button, 3, 0, 1, 2)
-        self.calculate_button.clicked.connect(self.calculate_subnet)
+        self.calculate_button.clicked.connect(self.calculate_subnets)
 
-        self.results = QTextEdit()
-        self.results.setReadOnly(True)
-        layout.addWidget(self.results, 4, 0, 1, 2)
+        self.results_box = QTextEdit()
+        self.results_box.setReadOnly(True)
 
-        self.setLayout(layout)
+        # Agregar widgets al layout
+        self.layout.addWidget(self.ip_label)
+        self.layout.addWidget(self.ip_input)
+        self.layout.addWidget(self.mask_label)
+        self.layout.addWidget(self.mask_input)
+        self.layout.addWidget(self.new_mask_label)
+        self.layout.addWidget(self.new_mask_input)
+        self.layout.addWidget(self.calculate_button)
+        self.layout.addWidget(self.results_box)
 
-    def calculate_subnet(self):
+        # Configurar contenedor
+        self.container.setLayout(self.layout)
+        self.setCentralWidget(self.container)
+
+    def calculate_subnets(self):
+        ip = self.ip_input.text()
         try:
-            ip = self.ip_input.text()
-            original_mask_bits = int(self.original_mask_input.text())
+            mask_bits = int(self.mask_input.text())
             new_mask_bits = int(self.new_mask_input.text())
 
-            if new_mask_bits <= original_mask_bits or new_mask_bits > 30:
-                self.results.setPlainText("La nueva máscara debe estar entre la original y un valor máximo de /30.")
+            if new_mask_bits <= mask_bits or new_mask_bits > 30:
+                self.results_box.setPlainText("La nueva máscara debe ser mayor a la original y menor o igual a /30.")
                 return
 
-            subnets = calculate_subnets(ip, original_mask_bits, new_mask_bits)
+            wildcard = calculate_wildcard(mask_bits)
+            subnets = subnet_details(ip, mask_bits, new_mask_bits)
 
-            result_text = f"<b>División de subredes de /{original_mask_bits} a /{new_mask_bits}:</b><br><br>"
+            results = f"Address: {ip}/{mask_bits}\n"
+            netmask = ".".join([str((0xFFFFFFFF << (32 - mask_bits) >> i) & 0xFF) for i in [24, 16, 8, 0]])
+            results += f"Netmask: {netmask}\n"
+            results += f"Wildcard: {wildcard}\n\n"
+
             for i, subnet in enumerate(subnets, start=1):
-                result_text += (
-                    f"<b>Subred {i}:</b><br>"
-                    f"Network: {subnet['network_ip']} ({subnet['network_bin']})<br>"
-                    f"HostMin: {subnet['host_min']}<br>"
-                    f"HostMax: {subnet['host_max']}<br>"
-                    f"Broadcast: {subnet['broadcast_ip']}<br>"
-                    f"Hosts/Net: {subnet['hosts_count']}<br><br>"
+                results += (
+                    f"Subred {i}:\n"
+                    f"  Network: {subnet['network_ip']}/{new_mask_bits}\n"
+                    f"  Broadcast: {subnet['broadcast_ip']}\n"
+                    f"  HostMin: {subnet['first_host_ip']}\n"
+                    f"  HostMax: {subnet['last_host_ip']}\n"
+                    f"  Hosts disponibles: {subnet['hosts_count']}\n\n"
                 )
 
-            self.results.setHtml(result_text)
-            self.results.moveCursor(QTextCursor.MoveOperation.Start)
+            self.results_box.setPlainText(results)
         except ValueError:
-            self.results.setPlainText("Error: Verifica que los datos ingresados sean válidos.")
+            self.results_box.setPlainText("Error: Verifica que los datos ingresados sean válidos.")
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = SubnetCalculator()
-    window.resize(600, 400)
     window.show()
     sys.exit(app.exec())
